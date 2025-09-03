@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>Mixed Reality WebXR App for Quest 3</title>
+    <title>Collaborative Mixed Reality Drawing App</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
@@ -46,6 +46,16 @@
             max-width: 90%;
             line-height: 1.5;
         }
+        #user-id-display {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            font-size: 12px;
+            color: #ccc;
+            background: rgba(0,0,0,0.5);
+            padding: 5px 10px;
+            border-radius: 5px;
+        }
     </style>
 </head>
 <body>
@@ -53,78 +63,94 @@
         Initializing...
     </div>
     <button id="ar-button" style="display: none;">Enter AR</button>
+    <div id="user-id-display"></div>
 
     <!-- Import three.js library -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 
+    <!-- Import Firebase libraries -->
     <script type="module">
-        const infoText = document.getElementById('info');
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot, query, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // By wrapping our code in a main function, we avoid any top-level 'return' or scope issues.
+        const infoText = document.getElementById('info');
+        const userIdDisplay = document.getElementById('user-id-display');
+
         async function main() {
+            // --- Firebase Variables ---
+            let db, auth, userId, appId;
+            const renderedLines = new Map(); // Tracks lines from Firestore to prevent duplicates
+
+            // --- NEW: Firebase Setup ---
+            async function initializeFirebase() {
+                infoText.textContent = "Connecting to collaborative session...";
+                // These global variables are provided by the environment.
+                appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : { apiKey: "DEMO", authDomain: "DEMO", projectId: "DEMO" };
+                const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : undefined;
+
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                setLogLevel('error'); // Use 'debug' for more verbose logging
+
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+                
+                userId = auth.currentUser.uid;
+                userIdDisplay.textContent = `UserID: ${userId}`;
+                infoText.textContent = "Connected!";
+            }
+            
             // Ensure three.js is loaded
             if (typeof THREE === 'undefined') {
                 throw new Error("Three.js library not found. Check your network connection.");
             }
-            infoText.innerHTML = 'three.js loaded successfully.';
 
             let camera, scene, renderer;
             let cube, xrSession = null;
             let controller1, controller2;
 
-            const MAX_POINTS = 500; // Max points per line
+            const MAX_POINTS = 500; 
 
             // --- Basic Three.js Scene Setup ---
             function init() {
-                infoText.innerHTML = 'init() called. Creating scene...';
                 scene = new THREE.Scene();
-
-                infoText.innerHTML = 'Creating camera...';
                 camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
-
-                infoText.innerHTML = 'Creating WebGL Renderer...';
                 renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-                
-                infoText.innerHTML = 'Configuring renderer...';
                 renderer.setSize(window.innerWidth, window.innerHeight);
                 renderer.setPixelRatio(window.devicePixelRatio);
                 renderer.xr.enabled = true;
-                
-                infoText.innerHTML = 'Appending renderer to document...';
                 document.body.appendChild(renderer.domElement);
 
-                infoText.innerHTML = 'Adding lighting...';
                 const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
                 light.position.set(0.5, 1, 0.25);
                 scene.add(light);
                 const ambientLight = new THREE.AmbientLight(0x404040, 2);
                 scene.add(ambientLight);
 
-                infoText.innerHTML = 'Creating cube geometry...';
                 const geometry = new THREE.BoxGeometry(0.2, 0.2, 0.2);
                 const material = new THREE.MeshStandardMaterial({ color: 0x00ff7f, transparent: true, opacity: 0.5 });
                 cube = new THREE.Mesh(geometry, material);
                 cube.position.set(0, 1.5, -1);
                 scene.add(cube);
 
-                infoText.innerHTML = 'Setting up controllers...';
                 setupControllers();
-                
-                infoText.innerHTML = 'Three.js scene setup complete. Starting WebXR setup...';
                 setupXR();
             }
 
-            // --- NEW: Controller Setup Function ---
+            // --- Controller Setup ---
             function setupControllers() {
-                // Controller 1 (Left or Right)
                 controller1 = renderer.xr.getController(0);
                 controller1.addEventListener('selectstart', onSelectStart);
                 controller1.addEventListener('selectend', onSelectEnd);
-                // Add a visual model to the controller
                 controller1.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -0.1)]), new THREE.LineBasicMaterial({ color: 0xff0000 })));
                 scene.add(controller1);
 
-                // Controller 2 (The other hand)
                 controller2 = renderer.xr.getController(1);
                 controller2.addEventListener('selectstart', onSelectStart);
                 controller2.addEventListener('selectend', onSelectEnd);
@@ -132,38 +158,59 @@
                 scene.add(controller2);
             }
 
-            // --- NEW: Drawing Event Handlers ---
-            function onSelectStart(event) {
+            // --- UPDATED: Drawing Event Handlers ---
+            async function onSelectStart(event) {
                 const controller = event.target;
                 
+                // Create a temporary local line for immediate visual feedback
                 const positions = new Float32Array(MAX_POINTS * 3);
                 const geometry = new THREE.BufferGeometry();
                 geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
                 geometry.setDrawRange(0, 0);
 
-                const material = new THREE.LineBasicMaterial({
-                    color: Math.random() * 0xffffff, // Random color for each line
-                    linewidth: 5
-                });
-
+                const material = new THREE.LineBasicMaterial({ color: 0xffff00, linewidth: 5 }); // Yellow for local line
                 const line = new THREE.Line(geometry, material);
-                line.position.set(0,0,0);
                 scene.add(line);
                 
-                // Store line and point count in controller's userData
                 controller.userData.isSelecting = true;
                 controller.userData.line = line;
                 controller.userData.pointCount = 0;
             }
 
-            function onSelectEnd(event) {
+            async function onSelectEnd(event) {
                 const controller = event.target;
+                if (!controller.userData.isSelecting || !controller.userData.line) return;
+                
+                const line = controller.userData.line;
+                const positions = line.geometry.attributes.position.array;
+                const pointCount = controller.userData.pointCount;
+                
+                if (pointCount > 1) { // Only save if there's more than one point
+                    const pointsToSave = Array.from(positions.slice(0, pointCount * 3));
+                    try {
+                        await addDoc(collection(db, `/artifacts/${appId}/public/data/lines`), {
+                            points: pointsToSave,
+                            color: "#" + new THREE.Color(Math.random() * 0xffffff).getHexString(),
+                            creatorId: userId,
+                            timestamp: Date.now()
+                        });
+                    } catch (error) {
+                        console.error("Error saving line: ", error);
+                        infoText.textContent = "Error: Could not save drawing.";
+                    }
+                }
+                
+                // Remove the temporary local line. The permanent one will be drawn by the listener.
+                scene.remove(line);
+                line.geometry.dispose();
+                line.material.dispose();
+                
                 controller.userData.isSelecting = false;
+                controller.userData.line = null;
             }
 
-            // --- NEW: Handle Controller Drawing Logic ---
             function handleControllerDrawing(controller) {
-                if (controller.userData.isSelecting) {
+                if (controller.userData.isSelecting && controller.userData.line) {
                     const line = controller.userData.line;
                     const geometry = line.geometry;
                     const positions = geometry.attributes.position.array;
@@ -174,7 +221,6 @@
                         positions[pointCount * 3] = controllerPosition.x;
                         positions[pointCount * 3 + 1] = controllerPosition.y;
                         positions[pointCount * 3 + 2] = controllerPosition.z;
-
                         pointCount++;
                         controller.userData.pointCount = pointCount;
                         geometry.setDrawRange(0, pointCount);
@@ -183,53 +229,46 @@
                 }
             }
 
+            // --- NEW: Firestore Real-time Listener ---
+            function listenForLines() {
+                const q = query(collection(db, `/artifacts/${appId}/public/data/lines`));
+                onSnapshot(q, (querySnapshot) => {
+                    querySnapshot.forEach((doc) => {
+                        // Check if we've already rendered this line
+                        if (!renderedLines.has(doc.id)) {
+                            const lineData = doc.data();
+                            const positions = new Float32Array(lineData.points);
+                            const geometry = new THREE.BufferGeometry();
+                            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                            geometry.setDrawRange(0, lineData.points.length / 3);
+                            const material = new THREE.LineBasicMaterial({ color: new THREE.Color(lineData.color), linewidth: 5 });
+                            const newLine = new THREE.Line(geometry, material);
+                            scene.add(newLine);
+                            renderedLines.set(doc.id, newLine);
+                        }
+                    });
+                });
+            }
 
-            // --- More Detailed WebXR Setup for Diagnostics ---
+            // --- WebXR Session Setup ---
             function setupXR() {
                 const arButton = document.getElementById('ar-button');
-                infoText.innerHTML = 'Checking for WebXR support...';
-
                 if ('xr' in navigator) {
-                    infoText.innerHTML = 'WebXR API found. Checking for AR support...';
-                    
-                    navigator.xr.isSessionSupported('immersive-ar')
-                        .then((supported) => {
-                            if (supported) {
-                                arButton.style.display = 'block';
-                                infoText.textContent = 'Ready to start Mixed Reality!';
-                                arButton.addEventListener('click', onEnterAR);
-                            } else {
-                                navigator.xr.isSessionSupported('immersive-vr').then((vrSupported) => {
-                                    if (vrSupported) {
-                                        infoText.innerHTML = `This device supports VR ('immersive-vr'), but not AR ('immersive-ar').<br/>Please ensure you're on a Quest 3 with passthrough enabled.`;
-                                    } else {
-                                        infoText.innerHTML = `WebXR is available, but no immersive session type (AR or VR) is supported.<br/>This is unexpected on a Quest device.`;
-                                    }
-                                });
-                            }
-                        }).catch((err) => {
-                            infoText.innerHTML = `Error checking AR support: ${err.message}`;
-                        });
-                } else {
-                    infoText.innerHTML = `WebXR API not found ('navigator.xr' is missing).<br/><br/>
-                        <strong>Troubleshooting:</strong><br/>
-                        1. Are you using the official <strong>Meta Quest Browser</strong>?<br/>
-                        2. Is the page loaded with <strong>HTTPS</strong> (GitHub Pages is fine)?<br/>
-                        3. Is your Quest's system software up to date?`;
-                }
+                    navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
+                        if (supported) {
+                            arButton.style.display = 'block';
+                            infoText.textContent = 'Ready to start Mixed Reality!';
+                            arButton.addEventListener('click', onEnterAR);
+                        } else { infoText.innerHTML = "Immersive AR not supported on this device."; }
+                    });
+                } else { infoText.innerHTML = "WebXR API not found."; }
             }
             
-            // --- AR Session Handling ---
             function onEnterAR() {
                 if (xrSession === null) {
-                    navigator.xr.requestSession('immersive-ar', {
-                        requiredFeatures: ['local-floor'],
-                    }).then(onSessionStarted).catch(err => {
-                        infoText.innerHTML = `Failed to start AR session: ${err.message}<br/>Try restarting the browser or headset.`;
-                    });
-                } else {
-                    xrSession.end();
-                }
+                    navigator.xr.requestSession('immersive-ar', { requiredFeatures: ['local-floor'] })
+                        .then(onSessionStarted).catch(err => { infoText.innerHTML = `Failed to start session: ${err.message}`; });
+                } else { xrSession.end(); }
             }
 
             function onSessionStarted(session) {
@@ -247,37 +286,31 @@
             }
 
             // --- Animation Loop ---
-            function animate(time, frame) {
+            function animate() {
                 if (!xrSession) return;
-                
-                // Keep the original cube spinning
                 cube.rotation.x += 0.01;
                 cube.rotation.y += 0.01;
-
-                // Handle drawing for both controllers
                 handleControllerDrawing(controller1);
                 handleControllerDrawing(controller2);
-
                 renderer.render(scene, camera);
             }
 
-            // --- Handle window resizing ---
             window.addEventListener('resize', () => {
                 camera.aspect = window.innerWidth / window.innerHeight;
                 camera.updateProjectionMatrix();
                 renderer.setSize(window.innerWidth, window.innerHeight);
             });
 
-            // Start the application
+            // --- Start the application ---
+            await initializeFirebase();
+            listenForLines();
             init();
         }
 
-        // Run the main application and catch any initialization errors.
+        // Run the main application
         main().catch(e => {
-            infoText.innerHTML = `A critical error occurred: <br/><strong>${e.message}</strong><br/><br/>This can be caused by a network issue, or browser settings blocking WebGL/WebXR. Try a hard refresh.`;
-            infoText.style.color = '#ff4d4d'; // Make error text red
-            infoText.style.textAlign = 'left';
-            infoText.style.padding = '20px';
+            infoText.innerHTML = `A critical error occurred: <br/><strong>${e.message}</strong>`;
+            infoText.style.color = '#ff4d4d';
         });
     </script>
 </body>
