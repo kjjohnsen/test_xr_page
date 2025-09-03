@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Mixed Reality WebXR App for Quest 3</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            margin: 0;
+            width: 100%;
+            height: 100vh;
+            overflow: hidden;
+            background-color: #1a1a1a;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+        }
+        #ar-button {
+            background-color: #007aff;
+            color: white;
+            padding: 15px 30px;
+            font-size: 18px;
+            border: none;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: background-color 0.3s, transform 0.1s;
+            box-shadow: 0 4px 15px rgba(0, 122, 255, 0.4);
+        }
+        #ar-button:hover {
+            background-color: #0056b3;
+        }
+        #ar-button:active {
+            transform: scale(0.95);
+        }
+        #info {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 10px;
+            background: rgba(0,0,0,0.5);
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div id="info">
+        Please use a WebXR-compatible browser on a Meta Quest 3.
+    </div>
+    <button id="ar-button" style="display: none;">Enter AR</button>
+
+    <!-- Import three.js library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <script type="module">
+        // Ensure three.js is loaded
+        if (typeof THREE === 'undefined') {
+            document.getElementById('info').textContent = 'Error: Could not load three.js library.';
+            return;
+        }
+
+        let camera, scene, renderer;
+        let cube, controller;
+        let xrSession = null;
+
+        // --- Basic Three.js Scene Setup ---
+        function init() {
+            // Scene
+            scene = new THREE.Scene();
+
+            // Camera (will be updated by WebXR)
+            camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.xr.enabled = true;
+            document.body.appendChild(renderer.domElement);
+
+            // Lighting
+            const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
+            light.position.set(0.5, 1, 0.25);
+            scene.add(light);
+            const ambientLight = new THREE.AmbientLight(0x404040, 2);
+            scene.add(ambientLight);
+
+            // Create a 3D Cube
+            const geometry = new THREE.BoxGeometry(0.2, 0.2, 0.2);
+            const material = new THREE.MeshStandardMaterial({ color: 0x00ff7f }); // A nice spring green
+            cube = new THREE.Mesh(geometry, material);
+            cube.position.set(0, 1.5, -1); // Position it in front of the user
+            scene.add(cube);
+            
+            // --- WebXR Setup ---
+            setupXR();
+        }
+
+        function setupXR() {
+            const arButton = document.getElementById('ar-button');
+            const infoText = document.getElementById('info');
+
+            // Check if WebXR is available
+            if ('xr' in navigator) {
+                navigator.xr.isSessionSupported('immersive-ar', { requiredFeatures: ['local-floor'] })
+                    .then((supported) => {
+                        if (supported) {
+                            arButton.style.display = 'block';
+                            infoText.textContent = 'Ready to start Mixed Reality!';
+                            arButton.addEventListener('click', onEnterAR);
+                        } else {
+                            infoText.textContent = 'AR not supported on this device. Try a Quest 3.';
+                        }
+                    });
+            } else {
+                infoText.textContent = 'WebXR API not found. Please use a compatible browser.';
+            }
+        }
+        
+        // --- AR Session Handling ---
+        function onEnterAR() {
+            if (xrSession === null) {
+                // Request an 'immersive-ar' session.
+                // This mode provides passthrough video on devices like the Quest 3.
+                navigator.xr.requestSession('immersive-ar', {
+                    requiredFeatures: ['local-floor'], // To get a proper reference space
+                    optionalFeatures: ['hand-tracking']
+                }).then(onSessionStarted);
+            } else {
+                xrSession.end();
+            }
+        }
+
+        function onSessionStarted(session) {
+            xrSession = session;
+            document.getElementById('ar-button').textContent = 'Exit AR';
+
+            session.addEventListener('end', onSessionEnded);
+
+            // Set the renderer's XR session
+            renderer.xr.setSession(session);
+
+            // Start the animation loop
+            renderer.setAnimationLoop(animate);
+        }
+
+        function onSessionEnded() {
+            xrSession = null;
+            document.getElementById('ar-button').textContent = 'Enter AR';
+            // Stop the animation loop if we were in a session
+            renderer.setAnimationLoop(null);
+        }
+
+        // --- Animation Loop ---
+        function animate(time, frame) {
+            if (xrSession) {
+                // The render loop is driven by the XR session
+                
+                // Animate the cube
+                cube.rotation.x += 0.01;
+                cube.rotation.y += 0.01;
+
+                // The renderer will automatically update the camera position
+                // and draw the scene for the XR display.
+                renderer.render(scene, camera);
+            }
+        }
+
+        // --- Handle window resizing ---
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // Start the application
+        init();
+
+    </script>
+</body>
+</html>
