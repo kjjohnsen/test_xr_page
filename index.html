@@ -40,15 +40,17 @@
             top: 20px;
             left: 50%;
             transform: translateX(-50%);
-            padding: 10px;
-            background: rgba(0,0,0,0.5);
+            padding: 10px 20px;
+            background: rgba(0,0,0,0.6);
             border-radius: 8px;
+            max-width: 90%;
+            line-height: 1.5;
         }
     </style>
 </head>
 <body>
     <div id="info">
-        Please use a WebXR-compatible browser on a Meta Quest 3.
+        Initializing...
     </div>
     <button id="ar-button" style="display: none;">Enter AR</button>
 
@@ -99,35 +101,51 @@
             setupXR();
         }
 
+        // --- NEW: More Detailed WebXR Setup for Diagnostics ---
         function setupXR() {
             const arButton = document.getElementById('ar-button');
             const infoText = document.getElementById('info');
+            infoText.innerHTML = 'Checking for WebXR support...';
 
             // Check if WebXR is available
             if ('xr' in navigator) {
-                navigator.xr.isSessionSupported('immersive-ar', { requiredFeatures: ['local-floor'] })
+                infoText.innerHTML = 'WebXR API found. Checking for AR support...';
+                
+                // Check if 'immersive-ar' (passthrough) session is supported
+                navigator.xr.isSessionSupported('immersive-ar')
                     .then((supported) => {
                         if (supported) {
                             arButton.style.display = 'block';
                             infoText.textContent = 'Ready to start Mixed Reality!';
                             arButton.addEventListener('click', onEnterAR);
                         } else {
-                            infoText.textContent = 'AR not supported on this device. Try a Quest 3.';
+                            // If AR is not supported, check for VR as a fallback diagnostic
+                            navigator.xr.isSessionSupported('immersive-vr').then((vrSupported) => {
+                                if (vrSupported) {
+                                    infoText.innerHTML = `This device supports VR ('immersive-vr'), but not AR ('immersive-ar').<br/>Please ensure you're on a Quest 3 with passthrough enabled.`;
+                                } else {
+                                    infoText.innerHTML = `WebXR is available, but no immersive session type (AR or VR) is supported.<br/>This is unexpected on a Quest device.`;
+                                }
+                            });
                         }
+                    }).catch((err) => {
+                        infoText.innerHTML = `Error checking AR support: ${err.message}`;
                     });
             } else {
-                infoText.textContent = 'WebXR API not found. Please use a compatible browser.';
+                // This is likely the block that is being triggered for you
+                infoText.innerHTML = `WebXR API not found ('navigator.xr' is missing).<br/><br/>
+                    <strong>Troubleshooting:</strong><br/>
+                    1. Are you using the official <strong>Meta Quest Browser</strong>?<br/>
+                    2. Is the page loaded with <strong>HTTPS</strong> (GitHub Pages is fine)?<br/>
+                    3. Is your Quest's system software up to date?`;
             }
         }
         
         // --- AR Session Handling ---
         function onEnterAR() {
             if (xrSession === null) {
-                // Request an 'immersive-ar' session.
-                // This mode provides passthrough video on devices like the Quest 3.
                 navigator.xr.requestSession('immersive-ar', {
                     requiredFeatures: ['local-floor'], // To get a proper reference space
-                    optionalFeatures: ['hand-tracking']
                 }).then(onSessionStarted);
             } else {
                 xrSession.end();
@@ -137,36 +155,25 @@
         function onSessionStarted(session) {
             xrSession = session;
             document.getElementById('ar-button').textContent = 'Exit AR';
-
             session.addEventListener('end', onSessionEnded);
-
-            // Set the renderer's XR session
             renderer.xr.setSession(session);
-
-            // Start the animation loop
             renderer.setAnimationLoop(animate);
         }
 
         function onSessionEnded() {
             xrSession = null;
             document.getElementById('ar-button').textContent = 'Enter AR';
-            // Stop the animation loop if we were in a session
             renderer.setAnimationLoop(null);
         }
 
         // --- Animation Loop ---
         function animate(time, frame) {
-            if (xrSession) {
-                // The render loop is driven by the XR session
-                
-                // Animate the cube
-                cube.rotation.x += 0.01;
-                cube.rotation.y += 0.01;
+            if (!xrSession) return;
+            
+            cube.rotation.x += 0.01;
+            cube.rotation.y += 0.01;
 
-                // The renderer will automatically update the camera position
-                // and draw the scene for the XR display.
-                renderer.render(scene, camera);
-            }
+            renderer.render(scene, camera);
         }
 
         // --- Handle window resizing ---
@@ -176,9 +183,9 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
         });
 
-        // Start the application
         init();
 
     </script>
 </body>
 </html>
+
