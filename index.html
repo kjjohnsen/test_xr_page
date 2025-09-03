@@ -87,7 +87,19 @@
                 infoText.textContent = "Connecting to collaborative session...";
                 // These global variables are provided by the environment.
                 appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-                const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : { apiKey: "DEMO", authDomain: "DEMO", projectId: "DEMO" };
+                
+                // --- PASTE YOUR FIREBASE CONFIGURATION HERE ---
+                // Replace this entire object with the one from your Firebase project
+// Your web app's Firebase configuration
+                const firebaseConfig = {
+                    apiKey: "AIzaSyAXj_1kEP4D9UygwUj-3o7Mn0KG8Qii20k",
+                    authDomain: "webxr-draw.firebaseapp.com",
+                    projectId: "webxr-draw",
+                    storageBucket: "webxr-draw.firebasestorage.app",
+                    messagingSenderId: "1025502059802",
+                    appId: "1:1025502059802:web:bc394fc3bb8bf84a7ce0a3"
+                };
+                
                 const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : undefined;
 
                 const app = initializeApp(firebaseConfig);
@@ -315,4 +327,5 @@
     </script>
 </body>
 </html>
+
 
