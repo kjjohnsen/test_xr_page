@@ -58,133 +58,148 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 
     <script type="module">
-        // Ensure three.js is loaded
-        if (typeof THREE === 'undefined') {
-            document.getElementById('info').textContent = 'Error: Could not load three.js library.';
-            return;
-        }
+        const infoText = document.getElementById('info');
 
-        let camera, scene, renderer;
-        let cube, controller;
-        let xrSession = null;
+        try {
+            // Ensure three.js is loaded
+            if (typeof THREE === 'undefined') {
+                infoText.textContent = 'Error: Could not load three.js library. Check your network connection.';
+                // We use return here as this is a fatal error for the script.
+                throw new Error("Three.js library not found.");
+            }
+            infoText.innerHTML = 'three.js loaded successfully.';
 
-        // --- Basic Three.js Scene Setup ---
-        function init() {
-            // Scene
-            scene = new THREE.Scene();
+            let camera, scene, renderer;
+            let cube, xrSession = null;
 
-            // Camera (will be updated by WebXR)
-            camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
+            // --- Basic Three.js Scene Setup ---
+            function init() {
+                infoText.innerHTML = 'init() called. Creating scene...';
+                scene = new THREE.Scene();
 
-            // Renderer
-            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(window.devicePixelRatio);
-            renderer.xr.enabled = true;
-            document.body.appendChild(renderer.domElement);
+                infoText.innerHTML = 'Creating camera...';
+                camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
 
-            // Lighting
-            const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
-            light.position.set(0.5, 1, 0.25);
-            scene.add(light);
-            const ambientLight = new THREE.AmbientLight(0x404040, 2);
-            scene.add(ambientLight);
-
-            // Create a 3D Cube
-            const geometry = new THREE.BoxGeometry(0.2, 0.2, 0.2);
-            const material = new THREE.MeshStandardMaterial({ color: 0x00ff7f }); // A nice spring green
-            cube = new THREE.Mesh(geometry, material);
-            cube.position.set(0, 1.5, -1); // Position it in front of the user
-            scene.add(cube);
-            
-            // --- WebXR Setup ---
-            setupXR();
-        }
-
-        // --- NEW: More Detailed WebXR Setup for Diagnostics ---
-        function setupXR() {
-            const arButton = document.getElementById('ar-button');
-            const infoText = document.getElementById('info');
-            infoText.innerHTML = 'Checking for WebXR support...';
-
-            // Check if WebXR is available
-            if ('xr' in navigator) {
-                infoText.innerHTML = 'WebXR API found. Checking for AR support...';
+                infoText.innerHTML = 'Creating WebGL Renderer...';
+                renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
                 
-                // Check if 'immersive-ar' (passthrough) session is supported
-                navigator.xr.isSessionSupported('immersive-ar')
-                    .then((supported) => {
-                        if (supported) {
-                            arButton.style.display = 'block';
-                            infoText.textContent = 'Ready to start Mixed Reality!';
-                            arButton.addEventListener('click', onEnterAR);
-                        } else {
-                            // If AR is not supported, check for VR as a fallback diagnostic
-                            navigator.xr.isSessionSupported('immersive-vr').then((vrSupported) => {
-                                if (vrSupported) {
-                                    infoText.innerHTML = `This device supports VR ('immersive-vr'), but not AR ('immersive-ar').<br/>Please ensure you're on a Quest 3 with passthrough enabled.`;
-                                } else {
-                                    infoText.innerHTML = `WebXR is available, but no immersive session type (AR or VR) is supported.<br/>This is unexpected on a Quest device.`;
-                                }
-                            });
-                        }
-                    }).catch((err) => {
-                        infoText.innerHTML = `Error checking AR support: ${err.message}`;
-                    });
-            } else {
-                // This is likely the block that is being triggered for you
-                infoText.innerHTML = `WebXR API not found ('navigator.xr' is missing).<br/><br/>
-                    <strong>Troubleshooting:</strong><br/>
-                    1. Are you using the official <strong>Meta Quest Browser</strong>?<br/>
-                    2. Is the page loaded with <strong>HTTPS</strong> (GitHub Pages is fine)?<br/>
-                    3. Is your Quest's system software up to date?`;
+                infoText.innerHTML = 'Configuring renderer...';
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                renderer.setPixelRatio(window.devicePixelRatio);
+                renderer.xr.enabled = true;
+                
+                infoText.innerHTML = 'Appending renderer to document...';
+                document.body.appendChild(renderer.domElement);
+
+                infoText.innerHTML = 'Adding lighting...';
+                const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
+                light.position.set(0.5, 1, 0.25);
+                scene.add(light);
+                const ambientLight = new THREE.AmbientLight(0x404040, 2);
+                scene.add(ambientLight);
+
+                infoText.innerHTML = 'Creating cube geometry...';
+                const geometry = new THREE.BoxGeometry(0.2, 0.2, 0.2);
+                const material = new THREE.MeshStandardMaterial({ color: 0x00ff7f });
+                cube = new THREE.Mesh(geometry, material);
+                cube.position.set(0, 1.5, -1);
+                scene.add(cube);
+                
+                infoText.innerHTML = 'Three.js scene setup complete. Starting WebXR setup...';
+                setupXR();
             }
-        }
-        
-        // --- AR Session Handling ---
-        function onEnterAR() {
-            if (xrSession === null) {
-                navigator.xr.requestSession('immersive-ar', {
-                    requiredFeatures: ['local-floor'], // To get a proper reference space
-                }).then(onSessionStarted);
-            } else {
-                xrSession.end();
+
+            // --- More Detailed WebXR Setup for Diagnostics ---
+            function setupXR() {
+                const arButton = document.getElementById('ar-button');
+                infoText.innerHTML = 'Checking for WebXR support...';
+
+                // Check if WebXR is available
+                if ('xr' in navigator) {
+                    infoText.innerHTML = 'WebXR API found. Checking for AR support...';
+                    
+                    navigator.xr.isSessionSupported('immersive-ar')
+                        .then((supported) => {
+                            if (supported) {
+                                arButton.style.display = 'block';
+                                infoText.textContent = 'Ready to start Mixed Reality!';
+                                arButton.addEventListener('click', onEnterAR);
+                            } else {
+                                navigator.xr.isSessionSupported('immersive-vr').then((vrSupported) => {
+                                    if (vrSupported) {
+                                        infoText.innerHTML = `This device supports VR ('immersive-vr'), but not AR ('immersive-ar').<br/>Please ensure you're on a Quest 3 with passthrough enabled.`;
+                                    } else {
+                                        infoText.innerHTML = `WebXR is available, but no immersive session type (AR or VR) is supported.<br/>This is unexpected on a Quest device.`;
+                                    }
+                                });
+                            }
+                        }).catch((err) => {
+                            infoText.innerHTML = `Error checking AR support: ${err.message}`;
+                        });
+                } else {
+                    infoText.innerHTML = `WebXR API not found ('navigator.xr' is missing).<br/><br/>
+                        <strong>Troubleshooting:</strong><br/>
+                        1. Are you using the official <strong>Meta Quest Browser</strong>?<br/>
+                        2. Is the page loaded with <strong>HTTPS</strong> (GitHub Pages is fine)?<br/>
+                        3. Is your Quest's system software up to date?`;
+                }
             }
-        }
-
-        function onSessionStarted(session) {
-            xrSession = session;
-            document.getElementById('ar-button').textContent = 'Exit AR';
-            session.addEventListener('end', onSessionEnded);
-            renderer.xr.setSession(session);
-            renderer.setAnimationLoop(animate);
-        }
-
-        function onSessionEnded() {
-            xrSession = null;
-            document.getElementById('ar-button').textContent = 'Enter AR';
-            renderer.setAnimationLoop(null);
-        }
-
-        // --- Animation Loop ---
-        function animate(time, frame) {
-            if (!xrSession) return;
             
-            cube.rotation.x += 0.01;
-            cube.rotation.y += 0.01;
+            // --- AR Session Handling ---
+            function onEnterAR() {
+                if (xrSession === null) {
+                    navigator.xr.requestSession('immersive-ar', {
+                        requiredFeatures: ['local-floor'],
+                    }).then(onSessionStarted).catch(err => {
+                        infoText.innerHTML = `Failed to start AR session: ${err.message}<br/>Try restarting the browser or headset.`;
+                    });
+                } else {
+                    xrSession.end();
+                }
+            }
 
-            renderer.render(scene, camera);
+            function onSessionStarted(session) {
+                xrSession = session;
+                document.getElementById('ar-button').textContent = 'Exit AR';
+                session.addEventListener('end', onSessionEnded);
+                renderer.xr.setSession(session);
+                renderer.setAnimationLoop(animate);
+            }
+
+            function onSessionEnded() {
+                xrSession = null;
+                document.getElementById('ar-button').textContent = 'Enter AR';
+                renderer.setAnimationLoop(null);
+            }
+
+            // --- Animation Loop ---
+            function animate(time, frame) {
+                if (!xrSession) return;
+                
+                cube.rotation.x += 0.01;
+                cube.rotation.y += 0.01;
+
+                renderer.render(scene, camera);
+            }
+
+            // --- Handle window resizing ---
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+
+            // Start the application
+            init();
+
+        } catch (e) {
+            // --- THIS IS THE CRITICAL PART ---
+            // If any error happened during initialization, display it on screen.
+            infoText.innerHTML = `A critical error occurred: <br/><strong>${e.message}</strong><br/><br/>This is often caused by browser settings or extensions blocking WebGL or WebXR.`;
+            infoText.style.color = '#ff4d4d'; // Make error text red
+            infoText.style.textAlign = 'left';
+            infoText.style.padding = '20px';
         }
-
-        // --- Handle window resizing ---
-        window.addEventListener('resize', () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        });
-
-        init();
-
     </script>
 </body>
 </html>
