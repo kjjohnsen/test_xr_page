@@ -18,7 +18,7 @@
             justify-content: center;
             text-align: center;
         }
-        #ar-button {
+        .xr-button {
             background-color: #007aff;
             color: white;
             padding: 15px 30px;
@@ -28,11 +28,12 @@
             cursor: pointer;
             transition: background-color 0.3s, transform 0.1s;
             box-shadow: 0 4px 15px rgba(0, 122, 255, 0.4);
+            margin: 5px;
         }
-        #ar-button:hover {
+        .xr-button:hover {
             background-color: #0056b3;
         }
-        #ar-button:active {
+        .xr-button:active {
             transform: scale(0.95);
         }
         #info {
@@ -45,6 +46,7 @@
             border-radius: 8px;
             max-width: 90%;
             line-height: 1.5;
+            z-index: 10;
         }
         #user-id-display {
             position: absolute;
@@ -56,13 +58,21 @@
             padding: 5px 10px;
             border-radius: 5px;
         }
+        #button-container {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+        }
     </style>
 </head>
 <body>
-    <div id="info">
-        Initializing...
+    <div id="info">Initializing...</div>
+    <div id="button-container">
+        <button id="ar-button" class="xr-button" style="display: none;">Enter AR</button>
+        <button id="clear-button" class="xr-button" style="display: none;">Clear All Drawings</button>
     </div>
-    <button id="ar-button" style="display: none;">Enter AR</button>
     <div id="user-id-display"></div>
 
     <!-- Import three.js library -->
@@ -71,65 +81,50 @@
     <!-- Import Firebase libraries -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, onSnapshot, query, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot, query, getDocs, writeBatch, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         const infoText = document.getElementById('info');
         const userIdDisplay = document.getElementById('user-id-display');
+        const arButton = document.getElementById('ar-button');
+        const clearButton = document.getElementById('clear-button');
 
         async function main() {
-            // --- Firebase Variables ---
             let db, auth, userId, appId;
-            const renderedLines = new Map(); // Tracks lines from Firestore to prevent duplicates
+            const renderedLines = new Map();
 
-            // --- NEW: Firebase Setup ---
             async function initializeFirebase() {
                 infoText.textContent = "Connecting to collaborative session...";
-                // These global variables are provided by the environment.
-                appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                appId = typeof __app_id !== 'undefined' ? __app_id : 'webxr-draw-app';
                 
-                // --- PASTE YOUR FIREBASE CONFIGURATION HERE ---
-                // Replace this entire object with the one from your Firebase project
-// Your web app's Firebase configuration
+                // --- User's Firebase Configuration ---
                 const firebaseConfig = {
                     apiKey: "AIzaSyAXj_1kEP4D9UygwUj-3o7Mn0KG8Qii20k",
                     authDomain: "webxr-draw.firebaseapp.com",
                     projectId: "webxr-draw",
-                    storageBucket: "webxr-draw.firebasestorage.app",
+                    storageBucket: "webxr-draw.appspot.com",
                     messagingSenderId: "1025502059802",
                     appId: "1:1025502059802:web:bc394fc3bb8bf84a7ce0a3"
                 };
                 
-                const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : undefined;
-
                 const app = initializeApp(firebaseConfig);
                 db = getFirestore(app);
                 auth = getAuth(app);
-                setLogLevel('error'); // Use 'debug' for more verbose logging
+                setLogLevel('error');
 
-                if (initialAuthToken) {
-                    await signInWithCustomToken(auth, initialAuthToken);
-                } else {
-                    await signInAnonymously(auth);
-                }
+                await signInAnonymously(auth);
                 
                 userId = auth.currentUser.uid;
                 userIdDisplay.textContent = `UserID: ${userId}`;
                 infoText.textContent = "Connected!";
             }
             
-            // Ensure three.js is loaded
-            if (typeof THREE === 'undefined') {
-                throw new Error("Three.js library not found. Check your network connection.");
-            }
+            if (typeof THREE === 'undefined') throw new Error("Three.js not found.");
 
-            let camera, scene, renderer;
-            let cube, xrSession = null;
+            let camera, scene, renderer, xrSession = null;
             let controller1, controller2;
+            const MAX_POINTS = 500;
 
-            const MAX_POINTS = 500; 
-
-            // --- Basic Three.js Scene Setup ---
             function init() {
                 scene = new THREE.Scene();
                 camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
@@ -145,42 +140,28 @@
                 const ambientLight = new THREE.AmbientLight(0x404040, 2);
                 scene.add(ambientLight);
 
-                const geometry = new THREE.BoxGeometry(0.2, 0.2, 0.2);
-                const material = new THREE.MeshStandardMaterial({ color: 0x00ff7f, transparent: true, opacity: 0.5 });
-                cube = new THREE.Mesh(geometry, material);
-                cube.position.set(0, 1.5, -1);
-                scene.add(cube);
-
                 setupControllers();
                 setupXR();
             }
 
-            // --- Controller Setup ---
             function setupControllers() {
                 controller1 = renderer.xr.getController(0);
                 controller1.addEventListener('selectstart', onSelectStart);
                 controller1.addEventListener('selectend', onSelectEnd);
-                controller1.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -0.1)]), new THREE.LineBasicMaterial({ color: 0xff0000 })));
                 scene.add(controller1);
 
                 controller2 = renderer.xr.getController(1);
                 controller2.addEventListener('selectstart', onSelectStart);
                 controller2.addEventListener('selectend', onSelectEnd);
-                controller2.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -0.1)]), new THREE.LineBasicMaterial({ color: 0x0000ff })));
                 scene.add(controller2);
             }
 
-            // --- UPDATED: Drawing Event Handlers ---
-            async function onSelectStart(event) {
+            function onSelectStart(event) {
                 const controller = event.target;
-                
-                // Create a temporary local line for immediate visual feedback
                 const positions = new Float32Array(MAX_POINTS * 3);
                 const geometry = new THREE.BufferGeometry();
                 geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-                geometry.setDrawRange(0, 0);
-
-                const material = new THREE.LineBasicMaterial({ color: 0xffff00, linewidth: 5 }); // Yellow for local line
+                const material = new THREE.LineBasicMaterial({ color: 0xffff00, linewidth: 5 });
                 const line = new THREE.Line(geometry, material);
                 scene.add(line);
                 
@@ -194,10 +175,10 @@
                 if (!controller.userData.isSelecting || !controller.userData.line) return;
                 
                 const line = controller.userData.line;
-                const positions = line.geometry.attributes.position.array;
                 const pointCount = controller.userData.pointCount;
                 
-                if (pointCount > 1) { // Only save if there's more than one point
+                if (pointCount > 1) {
+                    const positions = line.geometry.attributes.position.array;
                     const pointsToSave = Array.from(positions.slice(0, pointCount * 3));
                     try {
                         await addDoc(collection(db, `/artifacts/${appId}/public/data/lines`), {
@@ -212,7 +193,6 @@
                     }
                 }
                 
-                // Remove the temporary local line. The permanent one will be drawn by the listener.
                 scene.remove(line);
                 line.geometry.dispose();
                 line.material.dispose();
@@ -224,8 +204,7 @@
             function handleControllerDrawing(controller) {
                 if (controller.userData.isSelecting && controller.userData.line) {
                     const line = controller.userData.line;
-                    const geometry = line.geometry;
-                    const positions = geometry.attributes.position.array;
+                    const positions = line.geometry.attributes.position.array;
                     let pointCount = controller.userData.pointCount;
                     
                     if (pointCount < MAX_POINTS) {
@@ -235,40 +214,61 @@
                         positions[pointCount * 3 + 2] = controllerPosition.z;
                         pointCount++;
                         controller.userData.pointCount = pointCount;
-                        geometry.setDrawRange(0, pointCount);
-                        geometry.attributes.position.needsUpdate = true;
+                        line.geometry.setDrawRange(0, pointCount);
+                        line.geometry.attributes.position.needsUpdate = true;
                     }
                 }
             }
 
-            // --- NEW: Firestore Real-time Listener ---
+            // --- REVISED: Robust Firestore Listener ---
             function listenForLines() {
                 const q = query(collection(db, `/artifacts/${appId}/public/data/lines`));
-                onSnapshot(q, (querySnapshot) => {
-                    querySnapshot.forEach((doc) => {
-                        // Check if we've already rendered this line
-                        if (!renderedLines.has(doc.id)) {
-                            const lineData = doc.data();
-                            const positions = new Float32Array(lineData.points);
-                            const geometry = new THREE.BufferGeometry();
-                            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-                            geometry.setDrawRange(0, lineData.points.length / 3);
-                            const material = new THREE.LineBasicMaterial({ color: new THREE.Color(lineData.color), linewidth: 5 });
-                            const newLine = new THREE.Line(geometry, material);
-                            scene.add(newLine);
-                            renderedLines.set(doc.id, newLine);
+                onSnapshot(q, (snapshot) => {
+                    snapshot.docChanges().forEach((change) => {
+                        const docId = change.doc.id;
+                        const lineObject = renderedLines.get(docId);
+
+                        if (change.type === "added") {
+                            if (!lineObject) {
+                                const lineData = change.doc.data();
+                                const positions = new Float32Array(lineData.points);
+                                const geometry = new THREE.BufferGeometry();
+                                geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                                const material = new THREE.LineBasicMaterial({ color: new THREE.Color(lineData.color), linewidth: 5 });
+                                const newLine = new THREE.Line(geometry, material);
+                                scene.add(newLine);
+                                renderedLines.set(docId, newLine);
+                            }
+                        } else if (change.type === "removed") {
+                            if (lineObject) {
+                                scene.remove(lineObject);
+                                lineObject.geometry.dispose();
+                                lineObject.material.dispose();
+                                renderedLines.delete(docId);
+                            }
                         }
                     });
                 });
             }
 
-            // --- WebXR Session Setup ---
+            // --- NEW: Clear All Drawings Function ---
+            async function clearAllDrawings() {
+                infoText.textContent = "Clearing all drawings...";
+                clearButton.disabled = true;
+                const linesCollection = collection(db, `/artifacts/${appId}/public/data/lines`);
+                const linesSnapshot = await getDocs(linesCollection);
+                const batch = writeBatch(db);
+                linesSnapshot.forEach(doc => batch.delete(doc.ref));
+                await batch.commit();
+                infoText.textContent = "All drawings cleared!";
+                clearButton.disabled = false;
+            }
+
             function setupXR() {
-                const arButton = document.getElementById('ar-button');
                 if ('xr' in navigator) {
                     navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
                         if (supported) {
-                            arButton.style.display = 'block';
+                            arButton.style.display = 'inline-block';
                             infoText.textContent = 'Ready to start Mixed Reality!';
                             arButton.addEventListener('click', onEnterAR);
                         } else { infoText.innerHTML = "Immersive AR not supported on this device."; }
@@ -285,7 +285,8 @@
 
             function onSessionStarted(session) {
                 xrSession = session;
-                document.getElementById('ar-button').textContent = 'Exit AR';
+                arButton.textContent = 'Exit AR';
+                clearButton.style.display = 'inline-block'; // Show clear button
                 session.addEventListener('end', onSessionEnded);
                 renderer.xr.setSession(session);
                 renderer.setAnimationLoop(animate);
@@ -293,15 +294,13 @@
 
             function onSessionEnded() {
                 xrSession = null;
-                document.getElementById('ar-button').textContent = 'Enter AR';
+                arButton.textContent = 'Enter AR';
+                clearButton.style.display = 'none'; // Hide clear button
                 renderer.setAnimationLoop(null);
             }
 
-            // --- Animation Loop ---
             function animate() {
-                if (!xrSession) return;
-                cube.rotation.x += 0.01;
-                cube.rotation.y += 0.01;
+                if (!renderer.xr.isPresenting) return;
                 handleControllerDrawing(controller1);
                 handleControllerDrawing(controller2);
                 renderer.render(scene, camera);
@@ -317,9 +316,9 @@
             await initializeFirebase();
             listenForLines();
             init();
+            clearButton.addEventListener('click', clearAllDrawings);
         }
 
-        // Run the main application
         main().catch(e => {
             infoText.innerHTML = `A critical error occurred: <br/><strong>${e.message}</strong>`;
             infoText.style.color = '#ff4d4d';
@@ -327,5 +326,4 @@
     </script>
 </body>
 </html>
-
 
