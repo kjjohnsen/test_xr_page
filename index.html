@@ -60,17 +60,19 @@
     <script type="module">
         const infoText = document.getElementById('info');
 
-        try {
+        // By wrapping our code in a main function, we avoid any top-level 'return' or scope issues.
+        async function main() {
             // Ensure three.js is loaded
             if (typeof THREE === 'undefined') {
-                infoText.textContent = 'Error: Could not load three.js library. Check your network connection.';
-                // We use return here as this is a fatal error for the script.
-                throw new Error("Three.js library not found.");
+                throw new Error("Three.js library not found. Check your network connection.");
             }
             infoText.innerHTML = 'three.js loaded successfully.';
 
             let camera, scene, renderer;
             let cube, xrSession = null;
+            let controller1, controller2;
+
+            const MAX_POINTS = 500; // Max points per line
 
             // --- Basic Three.js Scene Setup ---
             function init() {
@@ -100,21 +102,93 @@
 
                 infoText.innerHTML = 'Creating cube geometry...';
                 const geometry = new THREE.BoxGeometry(0.2, 0.2, 0.2);
-                const material = new THREE.MeshStandardMaterial({ color: 0x00ff7f });
+                const material = new THREE.MeshStandardMaterial({ color: 0x00ff7f, transparent: true, opacity: 0.5 });
                 cube = new THREE.Mesh(geometry, material);
                 cube.position.set(0, 1.5, -1);
                 scene.add(cube);
+
+                infoText.innerHTML = 'Setting up controllers...';
+                setupControllers();
                 
                 infoText.innerHTML = 'Three.js scene setup complete. Starting WebXR setup...';
                 setupXR();
             }
+
+            // --- NEW: Controller Setup Function ---
+            function setupControllers() {
+                // Controller 1 (Left or Right)
+                controller1 = renderer.xr.getController(0);
+                controller1.addEventListener('selectstart', onSelectStart);
+                controller1.addEventListener('selectend', onSelectEnd);
+                // Add a visual model to the controller
+                controller1.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -0.1)]), new THREE.LineBasicMaterial({ color: 0xff0000 })));
+                scene.add(controller1);
+
+                // Controller 2 (The other hand)
+                controller2 = renderer.xr.getController(1);
+                controller2.addEventListener('selectstart', onSelectStart);
+                controller2.addEventListener('selectend', onSelectEnd);
+                controller2.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -0.1)]), new THREE.LineBasicMaterial({ color: 0x0000ff })));
+                scene.add(controller2);
+            }
+
+            // --- NEW: Drawing Event Handlers ---
+            function onSelectStart(event) {
+                const controller = event.target;
+                
+                const positions = new Float32Array(MAX_POINTS * 3);
+                const geometry = new THREE.BufferGeometry();
+                geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                geometry.setDrawRange(0, 0);
+
+                const material = new THREE.LineBasicMaterial({
+                    color: Math.random() * 0xffffff, // Random color for each line
+                    linewidth: 5
+                });
+
+                const line = new THREE.Line(geometry, material);
+                line.position.set(0,0,0);
+                scene.add(line);
+                
+                // Store line and point count in controller's userData
+                controller.userData.isSelecting = true;
+                controller.userData.line = line;
+                controller.userData.pointCount = 0;
+            }
+
+            function onSelectEnd(event) {
+                const controller = event.target;
+                controller.userData.isSelecting = false;
+            }
+
+            // --- NEW: Handle Controller Drawing Logic ---
+            function handleControllerDrawing(controller) {
+                if (controller.userData.isSelecting) {
+                    const line = controller.userData.line;
+                    const geometry = line.geometry;
+                    const positions = geometry.attributes.position.array;
+                    let pointCount = controller.userData.pointCount;
+                    
+                    if (pointCount < MAX_POINTS) {
+                        const controllerPosition = controller.position;
+                        positions[pointCount * 3] = controllerPosition.x;
+                        positions[pointCount * 3 + 1] = controllerPosition.y;
+                        positions[pointCount * 3 + 2] = controllerPosition.z;
+
+                        pointCount++;
+                        controller.userData.pointCount = pointCount;
+                        geometry.setDrawRange(0, pointCount);
+                        geometry.attributes.position.needsUpdate = true;
+                    }
+                }
+            }
+
 
             // --- More Detailed WebXR Setup for Diagnostics ---
             function setupXR() {
                 const arButton = document.getElementById('ar-button');
                 infoText.innerHTML = 'Checking for WebXR support...';
 
-                // Check if WebXR is available
                 if ('xr' in navigator) {
                     infoText.innerHTML = 'WebXR API found. Checking for AR support...';
                     
@@ -176,8 +250,13 @@
             function animate(time, frame) {
                 if (!xrSession) return;
                 
+                // Keep the original cube spinning
                 cube.rotation.x += 0.01;
                 cube.rotation.y += 0.01;
+
+                // Handle drawing for both controllers
+                handleControllerDrawing(controller1);
+                handleControllerDrawing(controller2);
 
                 renderer.render(scene, camera);
             }
@@ -191,15 +270,15 @@
 
             // Start the application
             init();
+        }
 
-        } catch (e) {
-            // --- THIS IS THE CRITICAL PART ---
-            // If any error happened during initialization, display it on screen.
-            infoText.innerHTML = `A critical error occurred: <br/><strong>${e.message}</strong><br/><br/>This is often caused by browser settings or extensions blocking WebGL or WebXR.`;
+        // Run the main application and catch any initialization errors.
+        main().catch(e => {
+            infoText.innerHTML = `A critical error occurred: <br/><strong>${e.message}</strong><br/><br/>This can be caused by a network issue, or browser settings blocking WebGL/WebXR. Try a hard refresh.`;
             infoText.style.color = '#ff4d4d'; // Make error text red
             infoText.style.textAlign = 'left';
             infoText.style.padding = '20px';
-        }
+        });
     </script>
 </body>
 </html>
